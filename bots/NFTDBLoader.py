@@ -7,6 +7,7 @@ from PIL import Image
 from multibase import encode, decode
 import csv
 import web3
+import natsort
 
 # Connect to MongoDB
 client = MongoClient("mongodb://localhost:27017")
@@ -88,7 +89,9 @@ def prepare_batch_mint_params(image_hashes):
 def load_nfts(json_directory, images_directory):
     nfts = []
     limitedCounter = 0
-    for file in os.listdir(json_directory):
+
+    files = natsort.natsorted(os.listdir(json_directory))
+    for file in files:
         if limitedCounter >= 10:
             break
         limitedCounter += 1

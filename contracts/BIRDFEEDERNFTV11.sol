@@ -153,8 +153,21 @@ contract BirdFeederNFT is
         uint256 indexed tokenId,
         uint256 discountAmount
     );
+
+    event ReferralRewardSent(
+        address indexed user,
+        address indexed referrer,
+        uint256 amount
+    );
+
     event NFTLocked(uint256 indexed tokenId, uint256 unlockTimestamp);
     event NFTUnlocked(uint256 indexed tokenId);
+
+    event ReferralRewardPaid(
+               address indexed referrer,
+               uint256 indexed tokenId,
+                uint256 referralReward
+            );
 
     /**
      * @dev Require msg.sender to be the creator of the token id
@@ -310,11 +323,18 @@ contract BirdFeederNFT is
         string memory data,
         string memory referralCode
     ) external payable nonReentrant whenNotPaused {
-        require(msg.value >= minimumMintPrice, "Insufficient payment");
-
         _tokenIds.increment();
         uint256 tokenId = _tokenIds.current();
 
+        if (
+            bytes(referralCode).length > 0 &&
+            referralCodes[referralCode] != address(0)
+        ) {
+            // Apply discount
+            applyDiscount(referralCode, tokenId);
+        } else {
+            require(msg.value >= minimumMintPrice, "Insufficient payment");
+        }
         // Mint the NFT
         _safeMint(to, tokenId, bytes(data));
 
@@ -327,13 +347,6 @@ contract BirdFeederNFT is
         // Emit event
         emit NFTMinted(to, tokenId, 1);
 
-        if (
-            bytes(referralCode).length > 0 &&
-            referralCodes[referralCode] != address(0)
-        ) {
-            // Apply discount
-            applyDiscount(referralCode, tokenId);
-        }
         // Lock the NFT
         _lockNFT(tokenId);
     }
@@ -525,12 +538,21 @@ contract BirdFeederNFT is
             uint256 discountAmount = (minimumMintPrice * discountRate) / 100;
             finalMintPrice = minimumMintPrice - discountAmount;
 
+            // send back the excess payment
+            uint256 excessPayment = msg.value - finalMintPrice;
+            payable(msg.sender).transfer(excessPayment);
+
+            emit DiscountApplied(msg.sender, _lazyMint.tokenId, discountAmount);
+
             // Transfer the referral reward to the referrer
             uint256 referralReward = (minimumMintPrice *
                 referralRewardPercentage) / 100;
             payable(referrer).transfer(referralReward);
-
-            emit DiscountApplied(msg.sender, _lazyMint.tokenId, discountAmount);
+            emit ReferralRewardPaid(
+                referrer,
+                _lazyMint.tokenId,
+                referralReward
+            );
         }
 
         require(msg.value >= finalMintPrice, "Insufficient payment");
@@ -690,12 +712,22 @@ contract BirdFeederNFT is
         uint256 discountAmount = (minimumMintPrice * discountRate) / 100;
         discounts[msg.sender] = discountAmount;
 
+        require(
+            minimumMintPrice - discountAmount < msg.value,
+            "Insufficient funds"
+        );
+
+        uint256 refundAmount = msg.value - (minimumMintPrice - discountAmount);
+        payable(msg.sender).transfer(refundAmount);
+
+        emit DiscountApplied(msg.sender, tokenId, discountAmount);
+
         // Transfer the referral reward to the referrer
         uint256 referralReward = (minimumMintPrice * referralRewardPercentage) /
             100;
         payable(referrer).transfer(referralReward);
 
-        emit DiscountApplied(msg.sender, tokenId, discountAmount);
+        emit ReferralRewardSent(msg.sender, referrer, referralReward);
     }
 
     function setTreasury(address newTreasury) external onlyOwner {
